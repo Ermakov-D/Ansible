@@ -1,0 +1,45 @@
+- hosts: cherry-gw
+  tasks:
+
+    - name: get file stat to be able to perform check in the following task
+      local_action: stat path=files/cherry-gw/firewall/use.this
+      register: file
+      ignore_errors: True
+
+    - name: get checksum for firewall-config
+      stat: path=/var/lib/firewall
+      register: fw_remote_firewall
+    - name: get checksum for firewall script
+      stat: path=/var/lib/firewall.cherry
+      register: fw_remote_firewall_cherry
+
+
+    - name: local md5sum firewall-config
+      local_action: stat path=files/cherry-gw/firewall/firewall 
+      register: fw_local_firewall
+    - name: local md5sum firewall-config
+      local_action: stat path=files/cherry-gw/firewall/firewall.cherry 
+      register: fw_local_firewall_cherry
+
+    - name: copy file if it exists
+      copy: src=files/cherry-gw/firewall/{{ item  }} dest=/tmp/ owner=root group=root mode=644 backup=yes
+      when: file.stat.exists
+      with_items:
+        - firewall
+        - firewall.cherry
+        - firewall.md5
+      become: yes
+
+    - name: copy if md5sum no equal
+      copy: src=files/cherry-gw/firewall/firewall dest=/tmp/ owner=root group=root mode=644 backup=yes
+      when: fw_local_firewall.stat.md5 != fw_remote_firewall.stat.md5
+      become: yes
+
+    - name: copy if checksum no equal
+      copy: src=files/cherry-gw/firewall/firewall.cherry dest=/tmp/ owner=root group=root mode=644 backup=yes
+      when: fw_local_firewall_cherry.stat.md5 != fw_remote_firewall_cherry.stat.md5
+      become: yes
+
+
+
+#    - debug: var=fw_conf_local
