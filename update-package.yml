@@ -1,10 +1,10 @@
-- hosts: nas
+- hosts: CentOS-server
   tasks:
    - name: Update Packages
      yum: name=* state=latest
      become: yes
 
-- hosts: cherry-gw
+- hosts: Ubuntu-server
   tasks:
    - name: Upgrade package in Cherry-gw
      apt: update_cache=yes upgrade=safe
