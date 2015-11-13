@@ -16,34 +16,34 @@
 #      become: yes
 
 
-    - name: get checksum for firewall-config
+    - name: Get remote MD5 for firewall-config
       stat: path=/var/lib/firewall
       register: fw_remote_firewall
-    - name: get checksum for firewall script
+    - name: Get remote MD5 for firewall script
       stat: path=/var/lib/firewall.cherry
       register: fw_remote_firewall_cherry
 
 
-    - name: local md5sum firewall-config
+    - name: Get local md5sum firewall-config
       local_action: stat path=files/cherry-gw/firewall/firewall 
       register: fw_local_firewall
-    - name: local md5sum firewall-config
+    - name: Get local md5sum firewall-config
       local_action: stat path=files/cherry-gw/firewall/firewall.cherry 
       register: fw_local_firewall_cherry
 
 
-    - name: copy if firewall md5sum no equal
+    - name: Copy "firewall" if md5sum no equal
       copy: src=files/cherry-gw/firewall/firewall dest=/var/lib/ owner=root group=root mode=644 backup=yes
       when: fw_local_firewall.stat.md5 != fw_remote_firewall.stat.md5
       become: yes
 
-    - name: copy if firewall.cherry checksum no equal
+    - name: Copy if "firewall.cherry" checksum no equal
       copy: src=files/cherry-gw/firewall/firewall.cherry dest=/var/lib/ owner=root group=root mode=744 backup=yes
       when: fw_local_firewall_cherry.stat.md5 != fw_remote_firewall_cherry.stat.md5
       become: yes
 
 
-    - name: Copy md5 file if script modified
+    - name: Copy "firewall.md5" if script modified
       copy: src=files/cherry-gw/firewall/firewall.md5 dest=/var/lib owner=root group=root mode=655
       when: fw_local_firewall_cherry.stat.md5 != fw_remote_firewall_cherry.stat.md5
       become: yes
@@ -55,5 +55,4 @@
       register: out
 
 #    - debug: var=out.stdout_lines
-
 #    - debug: var=fw_conf_local
