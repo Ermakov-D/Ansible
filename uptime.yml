@@ -1,8 +1,0 @@
-- hosts: all
-  gather_facts: no
-  tasks:
-    - shell: uptime
-      register: uptime
-
-    #- debug: msg={{ uptime.stdout }}
-    - debug: var=uptime.stdout_lines
