@@ -1,11 +1,11 @@
-- hosts: CentOS-server
+- hosts: all
   tasks:
-   - name: Update Packages
+   - name: Update Packages in CentOS
      yum: name=* state=latest
+     when: ansible_os_family == "RedHat"
      become: yes
 
-- hosts: Ubuntu-server
-  tasks:
-   - name: Upgrade package in Cherry-gw
+   - name: Upgrade package in Ubuntu 
      apt: update_cache=yes upgrade=safe
+     when: ansible_os_family == "Debian"
      become: yes
