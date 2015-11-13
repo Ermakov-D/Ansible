@@ -16,8 +16,8 @@ then
 #  then
 
 #    fi
-
-    ansible-playbook cherry-gw.yml
+    cd /home/depeche/Ansible
+    /usr/bin/ansible-playbook cherry-gw.yml
 
 
 fi
