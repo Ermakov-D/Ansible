@@ -1,68 +1,76 @@
 - hosts: cherry-gw
   vars:
-      firewall_remote: {
-          conf: /var/lib/firewall,
-          script:  /var/lib/firewall.cherry,
-          dir: /var/lib/
+      firewall: {
+          remote: {
+            conf: /var/lib/firewall,
+            script:  /var/lib/firewall.cherry,
+            dir: /var/lib/
+            },
+          local: {
+            conf: files/cherry-gw/firewall/firewall,
+            script: files/cherry-gw/firewall/firewall.cherry
+          }
       }
-      firewall_local: { 
-          conf: files/cherry-gw/firewall/firewall,
-          script: files/cherry-gw/firewall/firewall.cherry
-      }
+
   tasks:
-
-#    - name: get file stat to be able to perform check in the following task
-#      local_action: stat path=files/cherry-gw/firewall/use.this
-#      register: file
-#      ignore_errors: True
-
-#    - name: copy file if it exists
-#      copy: src=files/cherry-gw/firewall/{{ item  }} dest=/tmp/ owner=root group=root mode=644 backup=yes
-#      when: file.stat.exists
-#      with_items:
-#        - firewall
-#        - firewall.cherry
-#        - firewall.md5
-#      become: yes
 
 
     - name: Get remote MD5 for firewall-config
-      stat: path={{ firewall_remote.conf }}
+      tags: firewall
+      stat: path={{ firewall.remote.conf }}
       register: fw_remote_firewall
     - name: Get remote MD5 for firewall script
-      stat: path={{ firewall_remote.script }}
+      stat: path={{ firewall.remote.script }}
       register: fw_remote_firewall_cherry
 
 
     - name: Get local md5sum firewall-config
-      local_action: stat path={{ firewall_local.conf }}
+      tags: firewall
+      local_action: stat path={{ firewall.local.conf }}
       register: fw_local_firewall
     - name: Get local md5sum firewall-config
-      local_action: stat path={{ firewall_local.script }}
+      local_action: stat path={{ firewall.local.script }}
       register: fw_local_firewall_cherry
 
 
     - name: Copy "firewall" if md5sum no equal
-      copy: src={{ firewall_local.conf }} dest={{ firewall_remote.dir }} owner=root group=root mode=644 backup=yes
+      tags: firewall
+      copy: src={{ firewall.local.conf }} dest={{ firewall.remote.dir }} owner=root group=root mode=644 backup=yes
       when: fw_local_firewall.stat.md5 != fw_remote_firewall.stat.md5
       become: yes
 
     - name: Copy if "firewall.cherry" checksum no equal
-      copy: src={{ firewall_local.script }} dest={{ firewall_remote.dir }} owner=root group=root mode=744 backup=yes
+      tags: firewall
+      copy: src={{ firewall.local.script }} dest={{ firewall.remote.dir }} owner=root group=root mode=744 backup=yes
       when: fw_local_firewall_cherry.stat.md5 != fw_remote_firewall_cherry.stat.md5
       become: yes
 
 
     - name: Copy "firewall.md5" if script modified
-      copy: src=files/cherry-gw/firewall/firewall.md5 dest={{ firewall_remote.dir }} owner=root group=root mode=655
+      tags: firewall
+      copy: src=files/cherry-gw/firewall/firewall.md5 dest={{ firewall.remote.dir }} owner=root group=root mode=655
       when: fw_local_firewall_cherry.stat.md5 != fw_remote_firewall_cherry.stat.md5
       become: yes
 
     - name: Run firewall after copy file
+      tags: firewall
       command: '/var/lib/firewall.cherry'
       when: fw_local_firewall_cherry.stat.md5 != fw_remote_firewall_cherry.stat.md5 or fw_local_firewall.stat.md5 != fw_remote_firewall.stat.md5
       become: yes
       register: out
+
+    - name: Generate Cherry_VIP for squidGuard
+      tags: squid
+      template: src=templates/cherry_vip.j2 dest=/etc/squid3/cherry_vip
+      become: yes
+      register: squid_conf
+
+    - name: Перезапуск Squid после изменения конфигурации
+      tags: squid
+      command: '/usr/sbin/squid3 -k reconfigure'
+      when: squid_conf.changed
+      become: yes
+
 
 #    - debug: var=out.stdout_lines
 #    - debug: var=fw_conf_local
