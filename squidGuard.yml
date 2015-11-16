@@ -1,0 +1,22 @@
+- hosts: cherry-gw
+  vars:
+      cherry_vip_remote: /etc/squid3/cherry_vip
+      cherry_vip_local: files/cherry-gw/squid/cherry_vip
+  tasks:
+
+
+    - name: Get remote MD5 for CherryVIP
+      stat: path={{ cherry_vip_remote }}
+      register: cherry_vip_remote
+
+    - name: Get local md5sum CherryVIP
+      local_action: stat path={{ cherry_vip_local }}
+      register: cherry_vip_local
+
+    - name: Copy "firewall" if md5sum no equal
+      copy: src={{ cherry_vip_local }} dest=/etc/squid3/ owner=root group=root mode=644 backup=yes
+      when: cherry_vip_remote.stat.md5 != cherry_vip_local.stat.md5 or not cherry_vip_remote.stat.exists
+      become: yes
+
+    - debug: var=cherry_vip_remote.stat.md5
+
