@@ -1,4 +1,14 @@
 - hosts: cherry-gw
+  vars:
+      firewall_remote: {
+          conf: /var/lib/firewall,
+          script:  /var/lib/firewall.cherry,
+          dir: /var/lib/
+      }
+      firewall_local: { 
+          conf: files/cherry-gw/firewall/firewall,
+          script: files/cherry-gw/firewall/firewall.cherry
+      }
   tasks:
 
 #    - name: get file stat to be able to perform check in the following task
@@ -17,34 +27,34 @@
 
 
     - name: Get remote MD5 for firewall-config
-      stat: path=/var/lib/firewall
+      stat: path={{ firewall_remote.conf }}
       register: fw_remote_firewall
     - name: Get remote MD5 for firewall script
-      stat: path=/var/lib/firewall.cherry
+      stat: path={{ firewall_remote.script }}
       register: fw_remote_firewall_cherry
 
 
     - name: Get local md5sum firewall-config
-      local_action: stat path=files/cherry-gw/firewall/firewall 
+      local_action: stat path={{ firewall_local.conf }}
       register: fw_local_firewall
     - name: Get local md5sum firewall-config
-      local_action: stat path=files/cherry-gw/firewall/firewall.cherry 
+      local_action: stat path={{ firewall_local.script }}
       register: fw_local_firewall_cherry
 
 
     - name: Copy "firewall" if md5sum no equal
-      copy: src=files/cherry-gw/firewall/firewall dest=/var/lib/ owner=root group=root mode=644 backup=yes
+      copy: src={{ firewall_local.conf }} dest={{ firewall_remote.dir }} owner=root group=root mode=644 backup=yes
       when: fw_local_firewall.stat.md5 != fw_remote_firewall.stat.md5
       become: yes
 
     - name: Copy if "firewall.cherry" checksum no equal
-      copy: src=files/cherry-gw/firewall/firewall.cherry dest=/var/lib/ owner=root group=root mode=744 backup=yes
+      copy: src={{ firewall_local.script }} dest={{ firewall_remote.dir }} owner=root group=root mode=744 backup=yes
       when: fw_local_firewall_cherry.stat.md5 != fw_remote_firewall_cherry.stat.md5
       become: yes
 
 
     - name: Copy "firewall.md5" if script modified
-      copy: src=files/cherry-gw/firewall/firewall.md5 dest=/var/lib owner=root group=root mode=655
+      copy: src=files/cherry-gw/firewall/firewall.md5 dest={{ firewall_remote.dir }} owner=root group=root mode=655
       when: fw_local_firewall_cherry.stat.md5 != fw_remote_firewall_cherry.stat.md5
       become: yes
 
