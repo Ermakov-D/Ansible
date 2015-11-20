@@ -1,0 +1,9 @@
+---
+
+
+# - name: Generate IPTables Rules in VOIP Servers
+- hosts: Voip-Servers
+  roles:
+    - iptables
+
+

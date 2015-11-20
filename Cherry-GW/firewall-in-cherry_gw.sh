@@ -9,14 +9,13 @@ then
   # local_md5=`md5sum /srv/ansible-files/cherry-gw/firewall/firewall | awk '{print $1}'`
 
 
-  echo "remote: $remote_md5"
-  echo " local: ${local_md5}"
+  # echo "remote: $remote_md5"
+  # echo " local: ${local_md5}"
 
-#  if [ "$remote_md5" != "$local_md5" ]
-#  then
-
-#    fi
-    cd /home/depeche/Ansible
+  #  if [ "$remote_md5" != "$local_md5" ]
+  #  then
+  #  fi
+    cd /home/depeche/Ansible/Cherry-GW
     /usr/bin/ansible-playbook cherry-gw.yml
 
 

@@ -1,0 +1,19 @@
+*filter
+:INPUT ACCEPT [0:0]
+:FORWARD ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+:{{ RH_FW_Chain }} - [0:0]
+-A INPUT -j {{ RH_FW_Chain }}
+-A FORWARD -j {{ RH_FW_Chain }}
+-A {{ RH_FW_Chain }} -i lo -j ACCEPT
+-A {{ RH_FW_Chain }} -p icmp --icmp-type any -j ACCEPT
+
+{% for item in IP_USERS %}
+-A {{ RH_FW_Chain }} -s {{ item }} -j ACCEPT
+{% endfor %}
+
+-A {{ RH_FW_Chain }} -m state --state ESTABLISHED,RELATED -j ACCEPT
+-A {{ RH_FW_Chain }} -m state --state NEW -m tcp -p tcp --dport 22 -j ACCEPT
+-A {{ RH_FW_Chain }} -j LOG  --log-prefix "RH-FW-Log: "
+-A {{ RH_FW_Chain }} -j REJECT --reject-with icmp-host-prohibited
+COMMIT

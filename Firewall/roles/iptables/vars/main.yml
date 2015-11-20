@@ -1,0 +1,3 @@
+---
+    RH_FW_Chain: RH-Firewall-1-INPUT
+    iptables_dest: /etc/sysconfig/iptables

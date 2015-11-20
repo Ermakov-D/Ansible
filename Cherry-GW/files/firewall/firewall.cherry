@@ -1,0 +1,663 @@
+#!/bin/bash
+
+. /var/lib/firewall
+
+################################################
+# Firewall Rules for CherryPie  
+#  by Dmitriy Ermakov aka Depeche '10
+################################################
+check_sum
+
+/etc/init.d/fail2ban stop 
+
+/sbin/modprobe nf_conntrack
+/sbin/modprobe nf_conntrack_ftp
+
+
+echo "Firewall: initialization...."
+$IPTABLES --flush
+$IPTABLES -t nat --flush
+$IPTABLES -t mangle --flush
+
+echo "Firewall: set default policy"
+$IPTABLES --policy INPUT DROP
+$IPTABLES --policy OUTPUT DROP
+$IPTABLES --policy FORWARD DROP
+
+echo "Firewall: delete & create Valid_Chains"
+echo -ne "\t\t Delete: ${Color_Red}"; $IPTABLES -X Valid_Check; echo_ok
+#echo -ne "\t\t Flash: ${Color_Red}"; $IPTABLES -F Valid_Check; echo -e "${Color_Def}"
+echo -ne "\t\t Create: ${Color_Red}";$IPTABLES -N Valid_Check; echo_ok
+
+
+##### Debug
+$IPTABLES -A INPUT  -i $LAN_INTERFACE -s 192.168.15.51 -j ACCEPT
+$IPTABLES -A OUTPUT -o $LAN_INTERFACE -d 192.168.15.51 -j ACCEPT
+
+$IPTABLES -A INPUT  -i $EXT_INTERFACE -s 95.131.90.50 -j ACCEPT
+$IPTABLES -A OUTPUT -o $EXT_INTERFACE -d 95.131.90.50 -j ACCEPT
+
+$IPTABLES -A INPUT  -i $EXT_INTERFACE -s 95.131.89.10 -j ACCEPT
+$IPTABLES -A OUTPUT -o $EXT_INTERFACE -d 95.131.89.10 -j ACCEPT
+
+$IPTABLES -A INPUT  -s 192.168.12.2 -j ACCEPT
+$IPTABLES -A OUTPUT -d 192.168.12.2 -j ACCEPT
+
+$IPTABLES -A INPUT  -i $EXT_INTERFACE -s 91.238.188.0/22 -j ACCEPT
+$IPTABLES -A OUTPUT -o $EXT_INTERFACE -d 91.238.188.0/22 -j ACCEPT
+
+
+#$IPTABLES -A INPUT -i tun0 -j ACCEPT
+#$IPTABLES -A OUTPUT -o tun0 -j ACCEPT
+##############################
+
+############################################################################################
+
+## lo interface
+$IPTABLES -A INPUT  -i lo -j ACCEPT
+$IPTABLES -A OUTPUT -o lo -j ACCEPT
+
+###### Block USER
+if [ "$USE_TEMPLATE_BLOCK" == "1" ]; then
+    echo -e "Firewall: ${Color_Red}User Blocked${Color_Def} -"
+    show_format $TEMPLATE_BLOCK_USERS
+    $IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -d 95.131.89.24 -j ACCEPT
+    for i in $TEMPLATE_BLOCK_USERS; do
+	$IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -s $i -j REJECT
+	$IPTABLES -A INPUT -i $LAN_INTERFACE -s $i -j REJECT
+    done
+fi
+
+## WoT
+wot_server="94.198.55.91 178.20.235.48 213.252.177.91 193.110.91.19 213.252.177.122 213.252.131.29"
+for i in $wot_server; do
+    $IPTABLES -A FORWARD -i $LAN_INTERFACE -d $i -j LOG --log-level info --log-prefix "Access to Wot Server: "
+    $IPTABLES -A OUTPUT  -o $EXT_INTERFACE -d $i -j LOG --log-level info --log-prefix "Access to Wot Server: "
+done
+
+## NAT
+echo -ne "Firewall: ${Color_Gren}NAT${Color_Def} eth1 : "
+$IPTABLES -t nat -A POSTROUTING -s $LAN_ADDRESSES -o eth1 -j MASQUERADE
+$IPTABLES -t nat -A POSTROUTING -s 10.10.5.0/24   -o eth1 -j MASQUERADE
+$IPTABLES -t nat -A POSTROUTING -s $GUEST_WIFI_ADDRESSES	-o eth1 -j MASQUERADE
+echo_ok
+
+echo -e "Firewall: Set ${Color_Gren}Redirect${Color_Def}"
+for i in $FULL_ACCESS; do
+    $IPTABLES -t nat -A PREROUTING -i $LAN_INTERFACE -p tcp -s $i --sport $UNPRIVPORTS -j ACCEPT 
+done
+
+# Orders.Photo-Doma.RU
+$IPTABLES -t nat -A PREROUTING -i $LAN_INTERFACE -s $LAN_ADDRESSES -d orders.photo-doma.ru -j ACCEPT
+#
+
+$IPTABLES -t nat -A PREROUTING -i $LAN_INTERFACE -s $LAN_ADDRESSES ! -d $LAN_ADDRESSES -p tcp -m tcp --dport 80 -j REDIRECT --to-ports 8080
+#$IPTABLES -t nat -A PREROUTING -i $LAN_INTERFACE -s $LAN_ADDRESSES ! -d $LAN_ADDRESSES -p tcp -m tcp --dport 443 -j REDIRECT --to-ports 8080
+
+$IPTABLES -t nat -A PREROUTING -i $GUEST_WIFI_INTERFACE -s $GUEST_WIFI_ADDRESSES -p tcp -m tcp --dport 80 -j REDIRECT --to-ports 8080
+$IPTABLES -t nat -A PREROUTING -i $GUEST_WIFI_INTERFACE -s $GUEST_WIFI_ADDRESSES -p tcp -m tcp --dport 143 -j REDIRECT --to-ports 143
+
+
+#### Full Access #####
+echo "Firewall: Set Full Access for users:"
+show_format $FULL_ACCESS
+for i in $FULL_ACCESS; do   
+    $IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p tcp -s $i --sport $UNPRIVPORTS -j ACCEPT
+    $IPTABLES -A FORWARD -o $LAN_INTERFACE -i $EXT_INTERFACE -p tcp -d $i --dport $UNPRIVPORTS ! --syn -j ACCEPT
+    
+    $IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p udp -s $i -j ACCEPT 
+    $IPTABLES -A FORWARD -o $LAN_INTERFACE -i $EXT_INTERFACE -p udp -d $i -j ACCEPT     
+    
+    $IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -s $i -j ACCEPT 
+    $IPTABLES -A FORWARD -o $LAN_INTERFACE -i $EXT_INTERFACE -d $i -j ACCEPT 
+    
+done
+FULL_ACCESS=""
+##########################
+
+# Orders.Photo-Doma.RU
+$IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p tcp -s $LAN_ADDRESSES -d orders.photo-doma.ru -j ACCEPT
+$IPTABLES -A FORWARD -o $LAN_INTERFACE -i $EXT_INTERFACE -p tcp -d $LAN_ADDRESSES -s orders.photo-doma.ru ! --syn -j ACCEPT
+#
+
+###### Drop MSNetwork Access
+echo -e "Firewall: ${Color_Red}Drop${Color_Def} unpriv requests"
+$IPTABLES -A INPUT -i $EXT_INTERFACE -p tcp -m multiport --dports 135,137,138,445 -j DROP
+$IPTABLES -A INPUT -i $EXT_INTERFACE -p udp -m multiport --dports 135,137,138,445,1947 -j DROP
+$IPTABLES -A FORWARD -i $EXT_INTERFACE  -p tcp -m multiport  --dports 135,137,138,445 -j DROP
+$IPTABLES -A FORWARD -i $EXT_INTERFACE -p udp -m multiport  --dports 135,137,138,445,1947 -j DROP
+$IPTABLES -A INPUT -i $LAN_INTERFACE -p udp -d $LAN_BROADCAST -j REJECT
+$IPTABLES -A INPUT -i $LAN_INTERFACE -p udp -d 224.0.0.1 -j REJECT
+$IPTABLES -A INPUT -i $LAN_INTERFACE -p udp -d 255.255.255.255 -j REJECT
+################################################
+
+
+######### DHCP ############
+echo -e "Firewall: Add rules for ${Color_Gren}DHCP${Color_Def}"
+$IPTABLES -A INPUT  -i $LAN_INTERFACE -p tcp --sport 68 --dport 67 -j ACCEPT
+$IPTABLES -A OUTPUT -o $LAN_INTERFACE -p tcp --sport 67 --dport 68 -j ACCEPT
+
+$IPTABLES -A INPUT  -i $LAN_INTERFACE -p udp --sport 68 --dport 67 -j ACCEPT
+$IPTABLES -A OUTPUT -o $LAN_INTERFACE -p udp --sport 67 --dport 68 -j ACCEPT
+#############################
+
+######## DNS #######
+echo -e "Firewall: Add rules for ${Color_Gren}DNS${Color_Def}"
+$IPTABLES -A INPUT  -i $LAN_INTERFACE -p udp -s $LAN_ADDRESSES --sport $UNPRIVPORTS -d $LAN_IPADDR --dport 53 -j ACCEPT
+$IPTABLES -A OUTPUT -o $LAN_INTERFACE -p udp -s $LAN_IPADDR --sport 53 -d $LAN_ADDRESSES --dport $UNPRIVPORTS -j ACCEPT
+$IPTABLES -A INPUT  -i $GUEST_WIFI_INTERFACE -p udp -s $GUEST_WIFI_ADDRESSES --sport $UNPRIVPORTS -d $LAN_IPADDR --dport 53 -j ACCEPT
+$IPTABLES -A OUTPUT -o $GUEST_WIFI_INTERFACE -p udp -s $LAN_IPADDR --sport 53 -d $GUEST_WIFI_ADDRESSES --dport $UNPRIVPORTS -j ACCEPT
+
+for i in $NAMESERVERS; do
+#    $IPTABLES -A OUTPUT -o $EXT_INTERFACE -p udp -s $EXT_IPADDR --sport $UNPRIVPORTS -d $i --dport 53 -j ACCEPT
+#    $IPTABLES -A INPUT  -i $EXT_INTERFACE -p udp -d $EXT_IPADDR --dport $UNPRIVPORTS -s $i --sport 53 -j ACCEPT
+    $IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p udp --sport $UNPRIVPORTS -d $i --dport 53 -j ACCEPT
+#    $IPTABLES -A FORWARD -o $LAN_INTERFACE -i $EXT_INTERFACE -p udp -d $LAN_ADDRESSES --dport $UNPRIVPORTS -s $i --sport 53 -j ACCEPT
+done
+
+$IPTABLES -A OUTPUT -o $EXT_INTERFACE -p udp -s $EXT_IPADDR --sport $UNPRIVPORTS --dport 53 -j ACCEPT
+$IPTABLES -A INPUT  -i $EXT_INTERFACE -p udp -d $EXT_IPADDR --dport $UNPRIVPORTS --sport 53 -j ACCEPT
+
+$IPTABLES -A OUTPUT -o $EXT_INTERFACE -p udp -s $EXT_IPADDR --sport 53 --dport $UNPRIVPORTS -j ACCEPT
+$IPTABLES -A INPUT  -i $EXT_INTERFACE -p udp -d $EXT_IPADDR --dport 53 --sport $UNPRIVPORTS -j ACCEPT
+
+$IPTABLES -A INPUT  -i $LAN_INTERFACE -p udp -d $LAN_ADDRESSES --dport 53 -s 192.168.16.0/24 --sport $UNPRIVPORTS -j ACCEPT
+$IPTABLES -A OUTPUT -o $LAN_INTERFACE -p udp -s $LAN_ADDRESSES --sport 53 -d 192.168.16.0/24 --dport $UNPRIVPORTS -j ACCEPT
+
+
+####################################################################
+
+######### WEB ######################
+echo -e "Firewall: Add Rules for ${Color_Gren}Web Services${Color_Def}"
+
+## Local Apache
+echo -en "\t\t Local server: "
+$IPTABLES -A INPUT  -i $LAN_INTERFACE -p tcp -s $LAN_ADDRESSES --sport $UNPRIVPORTS -d $LAN_IPADDR --dport 80 -j ACCEPT 
+$IPTABLES -A OUTPUT -o $LAN_INTERFACE -p tcp -d $LAN_ADDRESSES --dport $UNPRIVPORTS -s $LAN_IPADDR --sport 80 ! --syn -j ACCEPT 
+echo_ok
+
+echo -en "\t\t Access for Proxy: "
+$IPTABLES -A OUTPUT -o $EXT_INTERFACE -p tcp -s $EXT_IPADDR --sport $UNPRIVPORTS --dport 80 -j ACCEPT
+$IPTABLES -A INPUT  -i $EXT_INTERFACE -p tcp --sport 80 -d $EXT_IPADDR --dport $UNPRIVPORTS ! --syn -j ACCEPT 
+$IPTABLES -A OUTPUT -o $EXT_INTERFACE -p tcp -s $EXT_IPADDR --sport $UNPRIVPORTS --dport 443 -j ACCEPT
+$IPTABLES -A INPUT  -i $EXT_INTERFACE -p tcp --sport 443 -d $EXT_IPADDR --dport $UNPRIVPORTS ! --syn -j ACCEPT 
+echo_ok
+
+echo -en "\t\t Access to Proxy: "
+$IPTABLES -A INPUT  -i $LAN_INTERFACE -p tcp -s $LAN_ADDRESSES --sport $UNPRIVPORTS -d $LAN_IPADDR --dport 8080 -j ACCEPT
+$IPTABLES -A OUTPUT -o $LAN_INTERFACE -p tcp -d $LAN_ADDRESSES --dport $UNPRIVPORTS -s $LAN_IPADDR --sport 8080 ! --syn -j ACCEPT
+
+$IPTABLES -A INPUT  -i $GUEST_WIFI_INTERFACE -p tcp -s $GUEST_WIFI_ADDRESSES --sport $UNPRIVPORTS -d $GUEST_WIFI_IPADDR --dport 8080 -j ACCEPT
+$IPTABLES -A OUTPUT -o $GUEST_WIFI_INTERFACE -p tcp -d $GUEST_WIFI_ADDRESSES --dport $UNPRIVPORTS -s $GUEST_WIFI_IPADDR --sport 8080 ! --syn -j ACCEPT
+
+$IPTABLES -A INPUT  -i $LAN_INTERFACE -p tcp -s 192.168.16.0/24 --sport $UNPRIVPORTS -d $LAN_IPADDR --dport 8080 -j ACCEPT
+$IPTABLES -A OUTPUT -o $LAN_INTERFACE -p tcp -d 192.168.16.0/24 --dport $UNPRIVPORTS -s $LAN_IPADDR --sport 8080 ! --syn -j ACCEPT
+
+
+# my
+$IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p tcp -s $LAN_ADDRESSES --sport $UNPRIVPORTS --dport 443 -j ACCEPT
+$IPTABLES -A FORWARD -i $GUEST_WIFI_INTERFACE -o $EXT_INTERFACE -p tcp -s $GUEST_WIFI_ADDRESSES --sport $UNPRIVPORTS --dport 443 -j ACCEPT
+$IPTABLES -A FORWARD -o $GUEST_WIFI_INTERFACE -i $EXT_INTERFACE -p tcp -d $GUEST_WIFI_ADDRESSES --dport $UNPRIVPORTS --sport 443 -j ACCEPT
+echo_ok
+#######################################################################
+
+
+###### MAIL Services #####################
+echo -e "Firewall: Add Rules for mail services"
+$IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p tcp -s $LAN_ADDRESSES --sport $UNPRIVPORTS --dport 110 -j ACCEPT
+$IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p tcp -s $LAN_ADDRESSES --sport $UNPRIVPORTS --dport 25 -j ACCEPT
+$IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p tcp -s $LAN_ADDRESSES --sport $UNPRIVPORTS --dport 995 -j ACCEPT
+$IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p tcp -s $LAN_ADDRESSES --sport $UNPRIVPORTS --dport 143 -j ACCEPT
+$IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p tcp -s $LAN_ADDRESSES --sport $UNPRIVPORTS --dport 993 -j ACCEPT
+$IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p tcp -s $LAN_ADDRESSES --sport $UNPRIVPORTS --dport 465 -j ACCEPT
+$IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p tcp -s $LAN_ADDRESSES --sport $UNPRIVPORTS --dport 587 -j ACCEPT
+
+$IPTABLES -A FORWARD -i $GUEST_WIFI_INTERFACE -o $EXT_INTERFACE -p tcp -s $GUEST_WIFI_ADDRESSES --sport $UNPRIVPORTS --dport 110 -j ACCEPT
+$IPTABLES -A FORWARD -i $GUEST_WIFI_INTERFACE -o $EXT_INTERFACE -p tcp -s $GUEST_WIFI_ADDRESSES --sport $UNPRIVPORTS --dport 25 -j ACCEPT
+$IPTABLES -A FORWARD -i $GUEST_WIFI_INTERFACE -o $EXT_INTERFACE -p tcp -s $GUEST_WIFI_ADDRESSES --sport $UNPRIVPORTS --dport 143 -j ACCEPT
+
+$IPTABLES -A OUTPUT -o $EXT_INTERFACE -p tcp -s $EXT_IPADDR --sport $UNPRIVPORTS -d 95.131.89.24 --dport 25 -j ACCEPT
+$IPTABLES -A INPUT  -i $EXT_INTERFACE -p tcp -d $EXT_IPADDR --dport $UNPRIVPORTS -s 95.131.89.24 --sport 25 -j ACCEPT
+#######################################################################
+
+
+#### FTP ########
+echo -e "Firewall: Add Rules for ${Color_Gren}FTP${Color_Def}"
+$IPTABLES -A OUTPUT -o $EXT_INTERFACE -p tcp -s $EXT_IPADDR --sport $UNPRIVPORTS --dport 20 -j ACCEPT
+$IPTABLES -A INPUT  -i $EXT_INTERFACE -p tcp -d $EXT_IPADDR --dport $UNPRIVPORTS --sport 20 ! --syn -j ACCEPT
+$IPTABLES -A OUTPUT -o $EXT_INTERFACE -p tcp -s $EXT_IPADDR --sport $UNPRIVPORTS --dport 21 -j ACCEPT
+$IPTABLES -A INPUT  -i $EXT_INTERFACE -p tcp -d $EXT_IPADDR --dport $UNPRIVPORTS --sport 21 ! --syn -j ACCEPT
+
+$IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p tcp -s $LAN_ADDRESSES --sport $UNPRIVPORTS -m multiport --dports 20,21 -j ACCEPT
+
+
+## Local FTP
+$IPTABLES -A INPUT  -i $EXT_INTERFACE -p tcp -d $EXT_IPADDR --sport $UNPRIVPORTS -m multiport --dports 20,21 -j ACCEPT
+$IPTABLES -A OUTPUT -o $EXT_INTERFACE -p tcp -s $EXT_IPADDR --dport $UNPRIVPORTS -m multiport --sports 20,21 ! --syn -j ACCEPT 
+
+$IPTABLES -A OUTPUT -o $EXT_INTERFACE -p tcp -s $EXT_IPADDR --sport 49125:50125 --dport $UNPRIVPORTS -j ACCEPT
+
+$IPTABLES -A INPUT  -i $LAN_INTERFACE -p tcp -s $LAN_ADDRESSES -d $EXT_IPADDR --sport $UNPRIVPORTS -m multiport --dports 20,21 -j ACCEPT
+$IPTABLES -A OUTPUT -o $LAN_INTERFACE -p tcp -d $LAN_ADDRESSES -s $EXT_IPADDR --dport $UNPRIVPORTS -m multiport --sports 20,21 -j ACCEPT   
+$IPTABLES -A INPUT  -i $LAN_INTERFACE -p tcp -s $LAN_ADDRESSES  --dport 49125:50125 --sport $UNPRIVPORTS -j ACCEPT
+$IPTABLES -A OUTPUT -o $LAN_INTERFACE -p tcp -d $LAN_ADDRESSES  --sport 49125:50125 --dport $UNPRIVPORTS -j ACCEPT
+###########
+#$IPTABLES -A FORWARD -p tcp --sport 1024: --dport 1024:  -m state --state ESTABLISHED,RELATED -j ACCEPT
+
+
+#$IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p tcp -s $LAN_ADDRESSES --sport $UNPRIVPORTS -m state --state NEW --dport 21 -j ACCEPT
+#$IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p tcp -s $LAN_ADDRESSES --sport $UNPRIVPORTS -m state --state NEW --dport 20 -j ACCEPT
+#$IPT  -A FORWARD -i $LOCAL_IF -p tcp --dport 21 -m state --state NEW -j ACCEPT
+# PASSIVE FTP
+#$IPTABLES -t filter -A FORWARD  -p tcp -m tcp --dport $UNPRIVPORTS -m state --state NEW -j ACCEPT
+#$IPTABLES -t filter -A FORWARD  -p udp -m udp --dport $UNPRIVPORTS -m state --state NEW -j ACCEPT
+
+#$IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p tcp -s $LAN_ADDRESSES --sport $UNPRIVPORTS --dport 21 -j ACCEPT
+#######################################################################
+
+
+
+
+############# ICMP #
+echo -e "Firewall: Rules for ${Color_Gren}ICMP${Color_Def}"
+#$IPTABLES -A INPUT -p icmp -j ACCEPT 
+#$IPTABLES -A OUTPUT -p icmp -j ACCEPT 
+
+$IPTABLES -A INPUT   --fragment -p icmp -j LOG --log-prefix "Fragmented incoming ICMP: "
+$IPTABLES -A INPUT   --fragment -p icmp -j DROP
+
+$IPTABLES -A OUTPUT  --fragment -p icmp -j LOG --log-prefix "Fragmented outcoming ICMP: "
+$IPTABLES -A OUTPUT  --fragment -p icmp -j DROP
+
+$IPTABLES -A FORWARD --fragment -p icmp -j LOG --log-prefix "Fragmented forwarding ICMP: "
+$IPTABLES -A FORWARD --fragment -p icmp -j DROP
+
+# Ping 
+$IPTABLES -A INPUT  -p icmp --icmp-type echo-request -s $EXT_ADDRESSES -d $EXT_IPADDR -j ACCEPT
+$IPTABLES -A OUTPUT -p icmp --icmp-type echo-reply -s $EXT_IPADDR -d $EXT_ADDRESSES -j ACCEPT
+
+$IPTABLES -A OUTPUT -p icmp --icmp-type echo-request -s $EXT_IPADDR -d 0/0 -j ACCEPT
+$IPTABLES -A INPUT  -p icmp --icmp-type echo-reply -s 0/0 -d $EXT_IPADDR -j ACCEPT
+
+$IPTABLES -A FORWARD -p icmp --icmp-type echo-request -s $LAN_ADDRESSES -d 0/0 -j ACCEPT
+$IPTABLES -A FORWARD -p icmp --icmp-type echo-reply -s 0/0 -d $LAN_ADDRESSES -j ACCEPT
+
+# 
+$IPTABLES -A INPUT   -p icmp --icmp-type fragmentation-needed -j ACCEPT
+$IPTABLES -A OUTPUT  -p icmp --icmp-type fragmentation-needed -j ACCEPT
+$IPTABLES -A FORWARD -p icmp --icmp-type fragmentation-needed -j ACCEPT
+
+$IPTABLES -A INPUT   -p icmp --icmp-type parameter-problem -j ACCEPT
+$IPTABLES -A OUTPUT  -p icmp --icmp-type parameter-problem -j ACCEPT
+$IPTABLES -A FORWARD -p icmp --icmp-type parameter-problem -j ACCEPT
+#Traceroute 
+$IPTABLES -A INPUT   -p icmp --icmp-type time-exceeded -j ACCEPT
+$IPTABLES -A OUTPUT  -p icmp --icmp-type time-exceeded -j ACCEPT
+$IPTABLES -A FORWARD -p icmp --icmp-type time-exceeded -j ACCEPT
+$IPTABLES -A OUTPUT  -p udp -s $EXT_IPADDR --sport 32769:65535 -d 0/0 --dport 33434:33523 -j ACCEPT
+$IPTABLES -A INPUT   -p udp -s $EXT_ADDRESSES --sport 32769:65535 -d $EXT_IPADDR --dport 33343:33523 -j ACCEPT
+
+$IPTABLES -A INPUT   -p icmp --icmp-type source-quench -j ACCEPT
+$IPTABLES -A OUTPUT  -p icmp --icmp-type source-quench -j ACCEPT
+$IPTABLES -A FORWARD -p icmp --icmp-type source-quench -j ACCEPT
+
+#All Access for local NetWork 
+$IPTABLES -A INPUT  -p icmp -s $LAN_ADDRESSES -j ACCEPT
+$IPTABLES -A OUTPUT -p icmp -d $LAN_ADDRESSES -j ACCEPT
+$IPTABLES -A OUTPUT -p udp -s $LAN_IPADDR --sport 32769:65535 -d $LAN_ADDRESSES --dport 33434:33523 -j ACCEPT
+
+$IPTABLES -A OUTPUT -p icmp -s $EXT_IPADDR -d 95.131.88.0/22 -j ACCEPT
+#############################################
+
+
+##### NTP
+echo -e "Firewall: Add Rules for NTP Service"
+$IPTABLES -A OUTPUT -o $EXT_INTERFACE -p udp -s $EXT_IPADDR --sport 123 --dport 123 -j ACCEPT
+$IPTABLES -A INPUT  -i $EXT_INTERFACE -p udp -d $EXT_IPADDR --dport 123 --sport 123 -j ACCEPT 
+$IPTABLES -A INPUT  -i $LAN_INTERFACE -p udp -s $LAN_ADDRESSES --sport 123 -d $LAN_IPADDR --dport 123 -j ACCEPT
+$IPTABLES -A OUTPUT -o $LAN_INTERFACE -p udp -d $LAN_ADDRESSES --dport 123 -s $LAN_IPADDR --sport 123 -j ACCEPT
+
+$IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p udp --sport 123 --dport 123 -j ACCEPT 
+$IPTABLES -A FORWARD -o $LAN_INTERFACE -i $EXT_INTERFACE -p udp --dport 123 --sport 123 -j ACCEPT
+
+
+
+######### ICQ
+echo -e "Firewall: Add Rules for ICQ Service"
+$IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p tcp -s $LAN_ADDRESSES --sport $UNPRIVPORTS -m multiport --dports 5190,5222 -j ACCEPT 
+$IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p tcp -s $LAN_ADDRESSES --sport $UNPRIVPORTS -m multiport --dports 2041,2042 -j ACCEPT 
+################################################
+
+######### WebMoney GateKeeper
+#echo -e "Firewall: Add Rules for WM GateKeer"
+#for i in $WM_GATEKEEPER_SERVER; do
+#    $IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p tcp -s $LAN_ADDRESSES --sport $UNPRIVPORTS -d $i --dport $WM_GATEKEEPER_PORT -j ACCEPT 
+#done
+
+######### Mail Agent
+#$IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p tcp -s $LAN_ADDRESSES --sport $UNPRIVPORTS -m multiport --dports 2041 -j ACCEPT 
+
+######### Rambler Games
+#$IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p tcp -s $LAN_ADDRESSES --sport $UNPRIVPORTS -d 81.19.66.120 --dport 9199 -j ACCEPT
+
+######### Local SSH
+echo -e "Firewall: Add Rules for local ssh"
+$IPTABLES -A INPUT  -i $LAN_INTERFACE -p tcp -s $LAN_ADDRESSES --sport $UNPRIVPORTS -d $LAN_IPADDR --dport 22 -j ACCEPT
+$IPTABLES -A OUTPUT -o $LAN_INTERFACE -p tcp -d $LAN_ADDRESSES --dport $UNPRIVPORTS -s $LAN_IPADDR --sport 22 -j ACCEPT
+$IPTABLES -A INPUT  -i tun0 -p tcp -d $LAN_ADDRESSES --dport 22 -s 172.16.15.0/24 --sport $UNPRIVPORTS -j ACCEPT
+$IPTABLES -A OUTPUT -o tun0 -p tcp -s $LAN_ADDRESSES --sport 22 -d 172.16.15.0/24 --dport $UNPRIVPORTS ! --syn -j ACCEPT
+$IPTABLES -A INPUT  -i tun1 -p tcp -d $LAN_ADDRESSES --dport 22 -s 172.16.16.0/24 --sport $UNPRIVPORTS -j ACCEPT
+$IPTABLES -A OUTPUT -o tun1 -p tcp -s $LAN_ADDRESSES --sport 22 -d 172.16.16.0/24 --dport $UNPRIVPORTS ! --syn -j ACCEPT
+$IPTABLES -A INPUT  -i $LAN_INTERFACE -p tcp -d $LAN_ADDRESSES --dport 22 -s 192.168.16.0/24 --sport $UNPRIVPORTS -j ACCEPT
+$IPTABLES -A OUTPUT -o $LAN_INTERFACE -p tcp -s $LAN_ADDRESSES --sport 22 -d 192.168.16.0/24 --dport $UNPRIVPORTS ! --syn -j ACCEPT
+
+######### OpenVPN
+echo -e "Firewall: Add Rules for OpenVPN"
+$IPTABLES -A INPUT  -i $EXT_INTERFACE -p tcp --sport $UNPRIVPORTS -d $EXT_IPADDR --dport 25876 -j ACCEPT
+$IPTABLES -A OUTPUT -o $EXT_INTERFACE -p tcp -s $EXT_IPADDR --sport 25876 --dport $UNPRIVPORTS -j ACCEPT
+
+$IPTABLES -A INPUT  -i $EXT_INTERFACE -p tcp -s 194.186.222.130 -d $EXT_IPADDR --dport 5190 -j ACCEPT
+$IPTABLES -A OUTPUT -o $EXT_INTERFACE -p tcp -s $EXT_IPADDR --sport 5190 -d 194.186.222.130  -j ACCEPT
+$IPTABLES -A INPUT  -i $EXT_INTERFACE -p tcp -s 188.123.248.109 -d $EXT_IPADDR --dport 5190 -j ACCEPT
+$IPTABLES -A OUTPUT -o $EXT_INTERFACE -p tcp -s $EXT_IPADDR --sport 5190 -d 188.123.248.109  -j ACCEPT
+
+
+$IPTABLES -A FORWARD -i $LAN_INTERFACE -o tun0 -j ACCEPT
+$IPTABLES -A FORWARD -i tun0 -o $LAN_INTERFACE -j ACCEPT 
+
+$IPTABLES -A FORWARD -i $LAN_INTERFACE -o tun1 -j ACCEPT
+$IPTABLES -A FORWARD -i tun1 -o $LAN_INTERFACE -j ACCEPT 
+
+
+######## Forward witch routing network
+$IPTABLES -A FORWARD -i $LAN_INTERFACE -o $LAN_INTERFACE -j ACCEPT
+
+######## Access to VOIP Server
+echo -e "Firewall: Add Rules for Access to VOIP Servers"
+for i in $VOIP_SERVERS; do
+    $IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -s $LAN_ADDRESSES -d $i -j ACCEPT
+done
+
+echo -en "Firewall: Add Rules for Access to local Samba Share"
+$IPTABLES -A INPUT  -i $LAN_INTERFACE -p udp -s $LAN_ADDRESSES -d $LAN_IPADDR --sport $UNPRIVPORTS -m multiport --dports 139,138 -j ACCEPT
+$IPTABLES -A OUTPUT -o $LAN_INTERFACE -p udp -s $LAN_IPADDR -d $LAN_ADDRESSES --dport $UNPRIVPORTS -m multiport --sports 139,138 -j ACCEPT
+
+$IPTABLES -A INPUT  -i $LAN_INTERFACE -p tcp -s $LAN_ADDRESSES -d $LAN_IPADDR --sport $UNPRIVPORTS -m multiport --dports 139,445 -j ACCEPT
+$IPTABLES -A OUTPUT -o $LAN_INTERFACE -p tcp -s $LAN_IPADDR -d $LAN_ADDRESSES --dport $UNPRIVPORTS -m multiport --sports 139,445 ! --syn -j ACCEPT
+echo
+
+echo -en "Firewall: Add Rules for Access to local Jabber Server"
+#$IPTABLES -A INPUT  -i $LAN_INTERFACE -p udp -s $LAN_ADDRESSES -d $LAN_IPADDR --sport $UNPRIVPORTS -m multiport --dports 5222,138 -j ACCEPT
+#$IPTABLES -A OUTPUT -o $LAN_INTERFACE -p udp -s $LAN_IPADDR -d $LAN_ADDRESSES --dport $UNPRIVPORTS -m multiport --sports 139,138 -j ACCEPT
+$IPTABLES -A INPUT  -i $LAN_INTERFACE -p tcp -s $LAN_ADDRESSES -d $LAN_IPADDR --sport $UNPRIVPORTS --dport 5222 -j ACCEPT
+$IPTABLES -A OUTPUT -o $LAN_INTERFACE -p tcp -s $LAN_IPADDR -d $LAN_ADDRESSES --dport $UNPRIVPORTS --sport 5222 ! --syn -j ACCEPT
+echo
+
+
+######## 
+echo -e "\t  Access to SberBank for:"
+show_format $Bank_USER
+for i in $Bank_USER; do
+    for srv in $SberBank_SERVER; do
+        $IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p udp -s $i --sport $UNPRIVPORTS -d $srv --dport 87 -j ACCEPT
+        $IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p tcp -s $i --sport $UNPRIVPORTS -d $srv --dport 1024 -j ACCEPT
+	#$IPTABLES -A FORWARD -i $EXT1_INTERFACE -o $LAN_INTERFACE -p udp -s $srv --sport 87 -d $i --dport $UNPRIVPORTS -j ACCEPT
+	#$IPTABLES -A FORWARD -i $EXT1_INTERFACE -o $LAN_INTERFACE -p tcp -s $srv --sport 87 -d $i --dport $UNPRIVPORTS ! --syn -j ACCEPT
+    done
+
+    $IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p tcp -s $i --sport $UNPRIVPORTS -d $NatcPromBank_SERVER --dport 3290 -j ACCEPT
+done
+
+echo -e "\t  Access to NetUp"
+for i in $NETUP_USER; do
+    $IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p tcp -s $i --sport $UNPRIVPORTS -d $NETUP_SRV --dport 11758 -j ACCEPT
+done
+
+echo -e "\t  Access for Admin Service:"
+show_format $ADMIN
+for i in $ADMIN; do
+    $IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p tcp -s $i --sport $UNPRIVPORTS --dport 22 -j ACCEPT
+    $IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p tcp -s $i --sport $UNPRIVPORTS --dport 8080 -j ACCEPT
+    $IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p tcp -s $i --sport $UNPRIVPORTS --dport 3389 -j ACCEPT
+    $IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p udp -s $i --sport $UNPRIVPORTS --dport 3389 -j ACCEPT
+    $IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p tcp -s $i --sport $UNPRIVPORTS --dport 8081 -j ACCEPT
+    $IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p tcp -s $i --sport $UNPRIVPORTS --dport 8082 -j ACCEPT
+    $IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p tcp -s $i --sport $UNPRIVPORTS --dport 11371 -j ACCEPT
+done
+
+echo -en "\t  Access to Remote OpenVPN Server:"
+show_format $OpenVPN_USER
+for i in $OpenVPN_USER; do
+    $IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p udp -s $i --sport $UNPRIVPORTS -d 84.204.128.98 --dport 11941 -j ACCEPT
+done
+
+
+if [ "$USE_IPPERF" == "1" ]; then
+    echo -en "\t  Access for IPerf: "
+    $IPTABLES -A INPUT  -p tcp --dport 5001 -j ACCEPT
+    $IPTABLES -A OUTPUT -p tcp --sport 5001 -j ACCEPT
+    $IPTABLES -A INPUT  -p udp --dport 5001 -j ACCEPT
+    $IPTABLES -A OUTPUT -p udp --sport 5001 -j ACCEPT
+fi
+echo -e "${Color_Gren}Ok${Color_Def}"
+
+$IPTABLES -A INPUT -i $EXT_INTERFACE -p tcp -s 95.131.90.50 --sport $UNPRIVPORTS -d $EXT_ADDRESSES --dport 5666 -j ACCEPT
+
+# Acces to FAX from external Network
+#echo -en "\t  Access from External Network to RDP port:"
+#$IPTABLES -t nat -A PREROUTING -p tcp -s 0.0.0.0/0 --sport $UNPRIVPORTS -d $EXT_IPADDR --dport 3389 -j DNAT --to-destination 192.168.15.53:3389
+#$IPTABLES -t nat -A PREROUTING -p tcp -s 193.200.238.115 --sport $UNPRIVPORTS -d $EXT_IPADDR --dport 8081 -j DNAT --to-destination 192.168.15.221:80
+#echo -e "${Color_Gren}Ok${Color_Def}"
+
+echo -en "\t  Access for Print Machine: "
+show_format $PRINT_MACHINES
+for i in $PRINT_MACHINES; do
+    $IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p tcp -s $i --sport $UNPRIVPORTS -m multiport --dports 40000:40199,6065 -j ACCEPT 
+done
+
+echo -en "\t  Access to VideoSystem: "
+$IPTABLES -t nat -A PREROUTING -p tcp --sport $UNPRIVPORTS -d $EXT_IPADDR --dport 5920 -j DNAT --to-destination $VIDEO_SRV:5920
+$IPTABLES -t nat -A PREROUTING -p tcp --sport $UNPRIVPORTS -d $EXT_IPADDR --dport 5921 -j DNAT --to-destination $VIDEO_SRV:5921
+$IPTABLES -A FORWARD -i $EXT_INTERFACE -o $LAN_INTERFACE -p tcp --sport $UNPRIVPORTS -d $VIDEO_SRV --dport 5920 -j ACCEPT
+$IPTABLES -A FORWARD -i $EXT_INTERFACE -o $LAN_INTERFACE -p tcp --sport $UNPRIVPORTS -d $VIDEO_SRV --dport 5921 -j ACCEPT
+$IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p tcp -s $VIDEO_SRV --sport 5920 --dport $UNPRIVPORTS -j ACCEPT
+$IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p tcp -s $VIDEO_SRV --sport 5921 --dport $UNPRIVPORTS -j ACCEPT
+echo_ok
+
+#echo -en "\t Access for TOP Eleven: "
+#$GUEST_WIFI_
+#$IPTABLES -A FORWARD -i $GUEST_WIFI_INTERFACE -o $EXT_INTERFACE -p tcp -s $GUEST_WIFI_ADDRESSES --sport $UNPRIVPORTS --dport 1935 -j ACCEPT
+#$IPTABLES -A FORWARD -o $GUEST_WIFI_INTERFACE -i $EXT_INTERFACE -p tcp -d $GUEST_WIFI_ADDRESSES --dport $UNPRIVPORTS --sport 1935 -j ACCEPT
+#echo_ok
+
+#echo -en "\t Acces to ${PPTP_SERVER} via PPTP"
+#for i in $PPTP_USERS; do
+#    $IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p tcp -s $i --sport $UNPRIVPORTS -d $PPTP_SERVER --dport 1723 -j ACCEPT
+#    $IPTABLES -A FORWARD -i $EXT_INTERFACE -o $LAN_INTERFACE -p tcp -s $PPTP_SERVER --sport 1723 -d $i --dport $UNPRIVPORTS -j ACCEPT
+#done
+#$IPTABLES -A FORWARD -p gre -j ACCEPT
+#echo_ok
+
+#echo -en "\t Access for IRFRus Tunel"
+#$IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p 47 -s 172.20.1.0/29 -d 94.159.14.134 -j ACCEPT
+#$IPTABLES -A FORWARD -i $EXT_INTERFACE -o $LAN_INTERFACE -p 47 -d 172.20.1.0/29 -s 94.159.14.134 -j ACCEPT
+
+#$IPTABLES -A OUTPUT -o $EXT_INTERFACE -s $EXT_IPADDR -d 94.159.14.134 -j ACCEPT
+#$IPTABLES -A INPUT  -i $EXT_INTERFACE -d $EXT_IPADDR -s 94.159.14.134 -j ACCEPT
+
+#$IPTABLES -A INPUT  -i $EXT_INTERFACE -p tcp -s 94.159.14.134 --sport $UNPRIVPORTS -d $EXT_IPADDR --dport 1723 -j ACCEPT
+
+#$IPTABLES -A INPUT -i gre_ifrrus -j ACCEPT
+#$IPTABLES -A OUTPUT -o gre_ifrrus -j ACCEPT
+
+#$IPTABLES -A OUTPUT -o $EXT_INTERFACE -s $EXT_IPADDR -d 95.131.89.52 -j ACCEPT
+#$IPTABLES -A INPUT  -i $EXT_INTERFACE -d $EXT_IPADDR -s 95.131.89.52 -j ACCEPT
+
+echo -en "\t Access for Prospect-FTP: "
+$IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p tcp -s 192.168.15.36 --sport $UNPRIVPORTS --dport 8989 -j ACCEPT
+$IPTABLES -A FORWARD -o $LAN_INTERFACE -i $EXT_INTERFACE -p tcp -d 192.168.15.36 --dport $UNPRIVPORTS --sport 8989 -j ACCEPT
+echo_ok
+
+
+echo -en "\t PrintHelp for 15.75: "
+$IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p tcp -s 192.168.15.75 --sport $UNPRIVPORTS --dport 23457 -j ACCEPT
+$IPTABLES -A FORWARD -o $LAN_INTERFACE -i $EXT_INTERFACE -p tcp -d 192.168.15.75 --dport $UNPRIVPORTS --sport 23430 -j ACCEPT
+echo_ok
+
+
+#echo -en "\t WebCam in Trassa: "
+#$IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p tcp -s $LAN_ADDRESSES --sport $UNPRIVPORTS -d rcracer-krylo.dyndns.org -m multiport --dports 8017,8018 -j ACCEPT
+#$IPTABLES -A FORWARD -o $LAN_INTERFACE -i $EXT_INTERFACE -p tcp -d $LAN_ADDRESSES --dport $UNPRIVPORTS -s rcracer-krylo.dyndns.org -m multiport --sports 8017,8018 -j ACCEPT
+#echo_ok
+
+echo -en "\t Access to local MySQL:"
+$IPTABLES -A INPUT  -i $EXT_INTERFACE -p tcp -s 95.131.89.29 --sport $UNPRIVPORTS -d $EXT_IPADDR --dport 3306 -j ACCEPT
+$IPTABLES -A OUTPUT -o $EXT_INTERFACE -p tcp -d 95.131.89.29 --dport $UNPRIVPORTS -s $EXT_IPADDR --sport 3306 -j ACCEPT
+echo_ok
+
+echo -en "\t Puppet Port Forward:"
+$IPTABLES -t nat -A PREROUTING -p tcp -s 95.131.88.0/22 -d $EXT_IPADDR --dport 8140 -j DNAT --to-destination 192.168.15.51:8140
+$IPTABLES -A FORWARD -i $EXT_INTERFACE -o $LAN_INTERFACE -m state -p tcp -d 192.168.15.51 --dport 8140 --state NEW,ESTABLISHED,RELATED -j ACCEPT
+echo_ok
+ 
+
+
+$IPTABLES -A INPUT -i $EXT_INTERFACE -p udp --dport 42757 -j DROP
+$IPTABLES -A INPUT -i $EXT_INTERFACE -p tcp --dport 42757 -j DROP
+$IPTABLES -A INPUT -i $EXT_INTERFACE -p udp --dport 51413 -j DROP 
+$IPTABLES -A INPUT -i $EXT_INTERFACE -p tcp --dport 51413 -j DROP
+$IPTABLES -A INPUT -i $EXT_INTERFACE -p udp --dport 17665 -j DROP 
+$IPTABLES -A INPUT -i $EXT_INTERFACE -p tcp --dport 17665 -j DROP
+ 
+############################################################################
+$IPTABLES -A FORWARD -i tun0 -o $LAN_INTERFACE -s 172.16.15.0/24 -d $LAN_ADDRESSES -j ACCEPT
+$IPTABLES -A FORWARD -i tun0 -o $LAN_INTERFACE -s 172.16.15.0/24 -d 10.10.5.0/24 -j ACCEPT
+$IPTABLES -A FORWARD -i tun1 -o $LAN_INTERFACE -s 172.16.16.0/24 -d $LAN_ADDRESSES -j ACCEPT
+$IPTABLES -A FORWARD -i tun1 -o $LAN_INTERFACE -s 172.16.16.0/24 -d 10.10.5.0/24 -j ACCEPT
+$IPTABLES -A OUTPUT -o $LAN_INTERFACE -d 10.10.5.0/24 -j ACCEPT
+$IPTABLES -A INPUT  -i $LAN_INTERFACE -s 10.10.5.0/24 -j ACCEPT
+############################################################################
+echo
+$IPTABLES -A FORWARD -i $LAN_INTERFACE -o $EXT_INTERFACE -p udp -s $LAN_IPADDR --sport $UNPRIVPORTS --dport 20014 -j ACCEPT
+$IPTABLES -A FORWARD -o $LAN_INTERFACE -i $EXT_INTERFACE -p udp -d $LAN_IPADDR --dport $UNPRIVPORTS --sport 20014 -j ACCEPT
+
+##################################################################################################################
+## Chain VALID_CHECK - Check packets for invalid flags etc.                                                     ##
+##				by Arno van Amersofoort 							##
+##				http://freshmeat.net/project/iptables-firewall/?topic_id=151			##
+##################################################################################################################
+#$IPTABLES -I INPUT 2 -i $LAN_INTERFACE -j Valid_Check
+$IPTABLES -I INPUT 2 -i $EXT_INTERFACE -j Valid_Check
+
+
+## Log scanning of nmap etc.
+############################
+if [ "$SCAN_LOG" == "1" ]; then
+    echo -e "Firewall: Logging of stealth scans (nmap probes etc.) $Color_Blue enabled... $Color_Def"
+
+    # (NMAP) FIN/URG/PSH
+    ####################
+    $IPTABLES -A Valid_Check -p tcp --tcp-flags ALL FIN,URG,PSH -m limit --limit 3/m --limit-burst 5 -j LOG --log-prefix "Stealth XMAS scan: "
+    # SYN/RST/ACK/FIN/URG
+    #####################
+    $IPTABLES -A Valid_Check -p tcp --tcp-flags ALL SYN,RST,ACK,FIN,URG -m limit --limit 3/m --limit-burst 5 -j LOG --log-prefix "Stealth XMAS-PSH scan: "
+    # ALL/ALL
+    #########
+    $IPTABLES -A Valid_Check -p tcp --tcp-flags ALL ALL -m limit --limit 3/m --limit-burst 5 -j LOG --log-prefix "Stealth XMAS-ALL scan: "
+    # NMAP FIN Stealth
+    ##################
+    $IPTABLES -A Valid_Check -p tcp --tcp-flags ALL FIN -m limit --limit 3/m --limit-burst 5 -j LOG --log-prefix "Stealth FIN scan: "
+    # SYN/RST
+    #########
+    $IPTABLES -A Valid_Check -p tcp --tcp-flags SYN,RST SYN,RST -m limit --limit 3/m --limit-burst 5 -j LOG --log-prefix "Stealth SYN/RST scan: "
+    # SYN/FIN (probably)
+    ####################
+    $IPTABLES -A Valid_Check -p tcp --tcp-flags SYN,FIN SYN,FIN -m limit --limit 3/m --limit-burst 5 -j LOG --log-prefix "Stealth SYN/FIN scan(?): "
+    # Null scan
+    ###########
+    $IPTABLES -A Valid_Check -p tcp --tcp-flags ALL NONE -m limit --limit 3/m --limit-burst 5 -j LOG --log-prefix "Stealth Null scan: "
+  else
+    echo -e "Firewall: Logging of stealth scans (nmap probes etc.) $Color_Pink disabled...$Color_Def"
+  fi
+
+  ############################
+  # Drop (NMAP) scan packets #
+  ############################
+  # NMAP FIN/URG/PSH
+  ##################
+  $IPTABLES -A Valid_Check -p tcp --tcp-flags ALL FIN,URG,PSH -j DROP
+  # SYN/RST/ACK/FIN/URG
+  #####################
+  $IPTABLES -A Valid_Check -p tcp --tcp-flags ALL SYN,RST,ACK,FIN,URG -j DROP
+  # ALL/ALL Scan
+  ##############
+  $IPTABLES -A Valid_Check -p tcp --tcp-flags ALL ALL -j DROP
+  # NMAP FIN Stealth
+  ##################
+  $IPTABLES -A Valid_Check -p tcp --tcp-flags ALL FIN -j DROP
+  # SYN/RST
+  #########
+  $IPTABLES -A Valid_Check -p tcp --tcp-flags SYN,RST SYN,RST -j DROP
+  # SYN/FIN -- Scan(probably)
+  ###########################
+  $IPTABLES -A Valid_Check -p tcp --tcp-flags SYN,FIN SYN,FIN -j DROP
+  # NMAP Null Scan
+  ################
+  $IPTABLES -A Valid_Check -p tcp --tcp-flags ALL NONE -j DROP
+  # Log packets with bad flags?
+  #############################
+  if [ "$BAD_FLAGS_LOG" == "1" ]; then
+    echo -e "Firewall: Logging of packets with bad TCP-flags $Color_Brue enabled... $Color_Def"
+    $IPTABLES -A Valid_Check -p tcp --tcp-option 64 -m limit --limit 3/m --limit-burst 1 -j LOG --log-level info --log-prefix "IPTables Bad TCP flag(64): "
+    $IPTABLES -A Valid_Check -p tcp --tcp-option 128 -m limit --limit 3/m --limit-burst 1 -j LOG --log-level info --log-prefix "IPTables Bad TCP flag(128): "
+  else
+    echo -e "Firewall: Logging of packets with bad TCP-flags $Color_Pink disabled... $Color_Def"
+  fi
+
+  # Drop packets with bad tcp flags
+  #################################
+  $IPTABLES -A Valid_Check -p tcp --tcp-option 64 -j DROP
+  $IPTABLES -A Valid_Check -p tcp --tcp-option 128 -j DROP
+
+  ## Log fragmented packets
+  #########################
+  if [ "$FRAG_LOG" == "1" ]; then
+    echo -e "Firewall: Logging of fragmented packets $Color_Blue enabled... $Color_Def"
+    $IPTABLES -A Valid_Check -f -m limit --limit 3/m --limit-burst 1 -j LOG --log-prefix "Fragmented packet: "
+  else
+    echo -e "Firewall: Logging of fragmented packets $Color_Pink disabled... $Color_Def"
+  fi
+
+  # Drop fragmented packets
+  #########################
+  $IPTABLES -A Valid_Check -f -j DROP
+#####################################################################################################
+#echo "-> END !!!"; exit 0
+#####################################################################################################
+
+
+
+
+#####  ACCESS All #######
+echo -e "Firewall: Allow all ${Color_Blue}ESTABLISHED${Color_Def} connection ${Color_Pink}wan->lan${Color_Def}"
+$IPTABLES -A FORWARD -i $EXT_INTERFACE -o $LAN_INTERFACE --destination $LAN_ADDRESSES --match state --state ESTABLISHED,RELATED -j ACCEPT
+$IPTABLES -A FORWARD -i $EXT_INTERFACE -o $LAN_INTERFACE --destination $VOIPSRV_NETWORK --match state --state ESTABLISHED,RELATED -j ACCEPT
+#$IPTABLES -A FORWARD -i $EXT_INTERFACE -o $GUEST_WIFI_INTERFACE --destination $GUEST_WIFI_ADDRESSES --match state --state ESTABLISHED,RELATED -j ACCEPT
+$IPTABLES -A FORWARD -i $LAN_INTERFACE -o tun0           --destination 172.16.15.0/24 --match state --state ESTABLISHED,RELATED -j ACCEPT
+$IPTABLES -A FORWARD -i $LAN_INTERFACE -o tun1           --destination 172.16.16.0/24 --match state --state ESTABLISHED,RELATED -j ACCEPT
+$IPTABLES -A FORWARD -p tcp --sport 1024: --dport 1024:  -m state --state ESTABLISHED,RELATED -j ACCEPT
+$IPTABLES -A INPUT   -i $EXT_INTERFACE -p tcp --dport 1024: -m state --state ESTABLISHED,RELATED -j ACCEPT
+
+# DEBUG
+if [ "$DEBUG" = "1" ]; then
+    echo -e "Firewall: Debug $Color_Blue enable... $Color_Def"
+    $IPTABLES -A INPUT   -j LOG --log-prefix "IPtables INPUT Debug: " --log-level  DEBUG
+    $IPTABLES -A OUTPUT  -j LOG --log-prefix "IPtables OUTPUT Debug: " --log-level  DEBUG
+    $IPTABLES -A FORWARD -j LOG --log-prefix "IPtables FORWARD Debug: " --log-level  DEBUG    
+else 
+    echo -e "Firewall: Debug $Color_Pink disable... $Color_Def"
+fi
+echo -e "Firewall: ***>$Color_Red !STARTING!$Color_Def <***"
+
+/etc/init.d/fail2ban start                    
+echo "last start: `date`" > /var/log/fw_last.start

@@ -1,0 +1,21 @@
+*filter
+:INPUT ACCEPT [0:0]
+:FORWARD ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+
+-A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+
+-A INPUT -p icmp -j ACCEPT
+-A INPUT -i lo -j ACCEPT
+
+-A INPUT -p tcp --dport 40022 -j ACCEPT
+
+{% for item in IP_USERS %}
+-A INPUT -s {{ item }} -j ACCEPT
+{% endfor %}
+
+# 16:34
+
+-A INPUT -j DROP
+-A FORWARD -j DROP
+COMMIT

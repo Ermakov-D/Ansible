@@ -1,0 +1,12 @@
+---
+
+   - name: iptable restart
+     service: name=iptables state=restarted
+     become: yes
+
+   - name: fail2ban restart
+     service: name=fail2ban state=restarted
+     become: yes
+     when: f2b.stat.exists
+
+

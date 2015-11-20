@@ -7,8 +7,8 @@
             dir: /var/lib/
             },
           local: {
-            conf: files/cherry-gw/firewall/firewall,
-            script: files/cherry-gw/firewall/firewall.cherry
+            conf: files/firewall/firewall,
+            script: files/firewall/firewall.cherry
           }
       }
 
@@ -61,16 +61,22 @@
 
     - name: Generate Cherry_VIP for squidGuard
       tags: squid
-      template: src=templates/cherry_vip.j2 dest=/etc/squid3/cherry_vip
+      template: src=templates/cherry_vip.j2 dest=/etc/squid3/cherry_vip backup=yes
       become: yes
+      notify:
+          - reload squid
       register: squid_conf
 
-    - name: Перезапуск Squid после изменения конфигурации
-      tags: squid
-      command: '/usr/sbin/squid3 -k reconfigure'
-      when: squid_conf.changed
-      become: yes
+    #- name: Перезапуск Squid после изменения конфигурации
+    #  tags: squid
+    #  command: '/usr/sbin/squid3 -k reconfigure'
+    #  when: squid_conf.changed
+    #  become: yes
 
+  handlers:
+    - name: reload squid
+      service: name=squid3 state=reloaded
+      become: yes
 
 #    - debug: var=out.stdout_lines
 #    - debug: var=fw_conf_local

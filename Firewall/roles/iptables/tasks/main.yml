@@ -1,0 +1,33 @@
+---
+
+    - name: Проверка на наличие fail2ban
+      # потому-что кто-то умудрился его поставить из исходников !!!!
+      # и не дай бог он, в следующий раз, разместит конфиг в /usr/local/etc
+      stat: path=/etc/fail2ban/fail2ban.conf
+      register: f2b
+
+    - name: Задание для iptable через цепочки RH-INPUT
+      template: src=rh-iptable-rules.j2 dest={{ iptables_dest }} backup=yes
+      become: yes
+      when: fw == "rh-fw"
+      notify:
+          - iptable restart
+          - fail2ban restart
+
+    - name: Задание для обычного fw
+      template: src=simple-iptable-rules.j2 dest={{ iptables_dest }} backup=yes
+      when: fw == "simple"
+      become: yes
+      notify:
+          - iptable restart
+          - fail2ban restart
+
+      #    - name: Проверка на fail2ban
+      #stat: path=/etc/fail2ban/fail2ban.conf
+      #register: f2b
+
+    #- name: Перезапуск fail2ban
+    #  command: service fail2ban restart
+    #  when: f2b.stat.exists
+    #- name: Debug
+    #  debug: var=f2b
